@@ -10,7 +10,7 @@
 
 using namespace std;
 
-constexpr int NP = 1000;
+constexpr int NP = 100;
 constexpr int NDIMS = 1000;
 
 constexpr int P_NP = max(1, int(0.05 * NP));
