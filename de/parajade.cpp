@@ -1,33 +1,35 @@
 #define _USE_MATH_DEFINES
+#define _CRT_SECURE_NO_WARNINGS
 
 #include <vector>
 #include <array>
 #include <random>
 #include <cmath>
 #include <algorithm>
-#include <memory>
 #include <tuple>
 #include <cassert>
+#include <numeric>
+#include <ctime>
+#include <cstdio>
 
 #include "thread_pool.hpp"
 
 using namespace std;
 using BS::thread_pool_light;
 
-constexpr int NP = 200;
+constexpr int NP = 4096;
 constexpr int NDIMS = 1000;
 
 constexpr int P_NP = max(1, int(0.05 * NP));
 constexpr float C = 0.1f;
 
-constexpr int EPOCHS = 10;
+constexpr int EPOCHS = 10'000'000;
 
-constexpr int n_threads = 4;
+constexpr int n_threads = 8;
 static_assert(NP % n_threads == 0);
 constexpr int n_thread_pop = NP / n_threads;
 
 using Specie = array<float, NDIMS>;
-using Population = array<Specie, NP>;
 
 float fitness(const Specie& x) {
     constexpr float A = 10;
@@ -37,27 +39,6 @@ float fitness(const Specie& x) {
         s += x[i] * x[i] - A * cosf(2 * M_PI * x[i]);
 
     return s;
-}
-
-pair<int, float> best_fitness(const vector<Specie>& pop) {
-    int best_idx = 0;
-    float best_val = fitness(pop[0]);
-    for (int i = 1; i < NP; ++i) {
-        float f = fitness(pop[i]);
-        if (f < best_val) {
-            best_val = f;
-            best_idx = i;
-        }
-    }
-        
-    return {best_idx, best_val};
-}
-
-float mean_fitness(const vector<Specie>& pop) {
-    float s = 0;
-    for (const Specie& x: pop)
-        s += fitness(x);
-    return s / NP;
 }
 
 struct WorkerContext {
@@ -128,6 +109,10 @@ void worker_routine(WorkerContext* pctx) {
 }
 
 int main() {
+    char fname[128]{};
+    sprintf(fname, "%04d_%04d.txt", NDIMS, NP);
+    FILE* logfile = fopen(fname, "w");
+
     vector<Specie> pop(NP);
     vector<float> pop_ft(NP);
     vector<int> sorted_ics(NP);
@@ -172,7 +157,7 @@ int main() {
             begin(sorted_ics) + P_NP, 
             end(sorted_ics), 
             [&](int p, int q) { 
-                return fitness(pop[p]) < fitness(pop[q]); 
+                return pop_ft[p] < pop_ft[q]; 
             }
         );
 
@@ -217,10 +202,22 @@ int main() {
             nu_f = (1 - C) * nu_f + C * mean_L;
         }
 
-        float mean = mean_fitness(pop),
-              best = best_fitness(pop).second;
-        printf("%03d mean: %.8f best: %.8f\n", epoch, 
-                mean, best);
+        if (epoch % 100 == 0 || epoch + 1 == EPOCHS) {
+            float mean = accumulate(pop_ft.begin(), pop_ft.end(), 0.f) / NP;
+            float best = *min_element(pop_ft.begin(), pop_ft.end());
+
+            time_t t = time(0);
+            auto now = localtime(&t);
+
+            char output[256]{};
+            sprintf(output, "[ %02d:%02d:%02d ] %05d mean: %.8f best: %.8f\n",
+                    now->tm_hour, now->tm_min, now->tm_sec, 
+                    epoch, mean, best);
+            printf("%s", output);
+            fprintf(logfile, "%s", output);
+        }
     }
+
+    fclose(logfile);
 }
 
