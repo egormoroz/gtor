@@ -73,10 +73,11 @@ def simplex(D, T, basis):
 def dual_simplex(A, b, c, s):
     T, D, basis = construct_table(A, b, c, s)
     x, z = simplex(D, T, basis)
+    print(np.vstack((T, D)))
 
     n_r = len(s) - s.count(LE)
     D = np.hstack((D[:, :-(n_r + 1)], D[:,-1,np.newaxis]))
-    T = np.hstack((-c, np.zeros(len(s) - s.count(GE) + 1)))
+    T = np.hstack((-c, np.zeros(D.shape[1] - len(c))))
 
     for i, j in enumerate(basis):
         T -= T[j] * D[i]
@@ -85,10 +86,15 @@ def dual_simplex(A, b, c, s):
     return x, z
 
     
-A = np.array([[3, 1], [4, 3], [1, 2]])
-b = np.array([3, 6, 4])
-c = np.array([4, 1])
-s = [EQ, GE, LE]
+# A = np.array([[3, 1], [4, 3], [1, 2]])
+# b = np.array([3, 6, 4])
+# c = np.array([4, 1])
+# s = [EQ, GE, LE]
+
+A = np.array([[1, 1], [2, 1], [1, 2], [1, 1]])
+b = np.array([3, 5, 5, 1])
+c = -np.array([2, 3])
+s = [LE, LE, LE, GE]
 
 print(dual_simplex(A, b, c, s))
 
