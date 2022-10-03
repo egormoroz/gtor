@@ -10,8 +10,8 @@ def construct_table(A, b, c, s):
     assert len(s) == m
     assert len(c) == n
 
-    E = np.zeros((m, m - s.count(EQ)))
-    R = np.zeros((m, m - s.count(LE)))
+    E = np.zeros((m, m - np.sum(s == EQ)))
+    R = np.zeros((m, m - np.sum(s == LE)))
 
     j, k = 0, 0
     for i, sgn in enumerate(s):
@@ -41,10 +41,10 @@ def construct_table(A, b, c, s):
 
         if sgn != EQ:
             p += 1
-        else:
+        if sgn != LE:
             q += 1
 
-    return T, D, np.array(basis)
+    return T, D, basis
 
 
 def simplex(D, T, basis):
@@ -73,9 +73,10 @@ def simplex(D, T, basis):
 def dual_simplex(A, b, c, s):
     T, D, basis = construct_table(A, b, c, s)
     x, z = simplex(D, T, basis)
-    print(np.vstack((T, D)))
+    if z > 0:
+        return None
 
-    n_r = len(s) - s.count(LE)
+    n_r = len(s) - np.sum(s == LE)
     D = np.hstack((D[:, :-(n_r + 1)], D[:,-1,np.newaxis]))
     T = np.hstack((-c, np.zeros(D.shape[1] - len(c))))
 
@@ -85,16 +86,19 @@ def dual_simplex(A, b, c, s):
     x, z = simplex(D, T, basis)
     return x, z
 
-    
-# A = np.array([[3, 1], [4, 3], [1, 2]])
-# b = np.array([3, 6, 4])
-# c = np.array([4, 1])
-# s = [EQ, GE, LE]
 
-A = np.array([[1, 1], [2, 1], [1, 2], [1, 1]])
-b = np.array([3, 5, 5, 1])
-c = -np.array([2, 3])
-s = [LE, LE, LE, GE]
+def main():
+    # A = np.array([[3, 1], [4, 3], [1, 2]])
+    # b = np.array([3, 6, 4])
+    # c = np.array([4, 1])
+    # s = [EQ, GE, LE]
 
-print(dual_simplex(A, b, c, s))
+    A = np.array([[1, 1], [2, 1], [1, 2], [1, 1]])
+    b = np.array([3, 5, 5, 1])
+    c = -np.array([2, 3])
+    s = np.array([LE, LE, LE, GE])
 
+    print(dual_simplex(A, b, c, s))
+
+if __name__ == "__main__":
+    main()
