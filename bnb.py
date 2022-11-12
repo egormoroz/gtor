@@ -66,9 +66,6 @@ def solve_relaxation(A, b, c, s, lo, up, fixed):
         x, z = sln
         x[fixed_mask] = fixed_vals
 
-        assert np.all(lo_vals[lo_mask] - 1e-8 <= x[lo_mask])
-        assert np.all(x[up_mask] <= up_vals[up_mask] + 1e-8)
-
         return x, z + fixed_z
 
     return None
@@ -98,7 +95,7 @@ def fix_var(i, fx, fixed):
     return fixed_mask, fixed_vals
 
 
-def bnb_v2(A, b, c, s, I, lo=None, up=None, target_gap=1e-8):
+def branch_and_bound(A, b, c, s, I, lo=None, up=None, target_gap=1e-5):
     m, n = A.shape
     EPS = 1e-8
 
@@ -147,16 +144,9 @@ def bnb_v2(A, b, c, s, I, lo=None, up=None, target_gap=1e-8):
                                       abs(dual_bound)))
 
                 print('** {} {} {:.2e}'.format('haha', z, gap), k)
-                #print(np.vstack((np.where(lo_mask), lo_vals[lo_mask])))
-                #print(np.vstack((np.where(up_mask), up_vals[up_mask])))
-                #print(np.vstack((np.where(fixed_mask), fixed_vals[fixed_mask])))
                 if gap < target_gap:
                     break
             continue
-
-        assert np.all(lo_vals[lo_mask] - 1e-8 <= x[lo_mask])
-        assert np.all(x[up_mask] <= up_vals[up_mask] + 1e-8)
-
 
         for i in non_ints:
             bnd = np.floor(x[i])
@@ -202,35 +192,14 @@ def main():
 
     up = np.array([True] * 3), np.ones(3)
 
-    bnb_v2(A, b, c, s, I, up=up)
+    branch_and_bound(A, b, c, s, I, up=up)
 
-    '''
-
-    branch_and_bound(A, b, c, s, I)
-
-    start = time.time()
-
-    x, z, gap = branch_and_bound(A, b, c, s, I)
-    end = time.time()
-
-    print('elapsed', end - start)
-
-    print(x, z, gap)
-
-    '''
 
 if __name__ == '__main__':
-    np.set_printoptions(edgeitems=30, linewidth=100000)
+    #np.set_printoptions(edgeitems=30, linewidth=100000)
 
-    A, b, c, s, I, lo, up = read_mps('gen-ip016.mps')
-    bnb_v2(A, b, c, s, I, lo=lo, up=up)
-    #sln = solve_relaxation(A, b, c, s, lo, up)
-    #print(sln)
+    #A, b, c, s, I, lo, up = read_mps('gen-ip016.mps')
+    #branch_and_bound(A, b, c, s, I, lo=lo, up=up)
 
-
-    #args = read_mps('flugpl.mps')
-    #args = read_mps('ej.mps')
-    
-    #branch_and_bound(*args)
-    #main()
+    main()
 
