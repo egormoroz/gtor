@@ -17,44 +17,56 @@
 using namespace std;
 using BS::thread_pool_light;
 
-constexpr int NP = 4096;
-constexpr int NDIMS = 1000;
+constexpr int NP = 64;
+constexpr int NDIMS = 200;
+
+constexpr size_t LAST_K = 5000;
+constexpr double MIN_MEAN_DELTA = 1e-10;
 
 constexpr int P_NP = max(1, int(0.05 * NP));
-constexpr float C = 0.1f;
+constexpr double C = 0.1;
 
-constexpr int EPOCHS = 10'000'000;
+constexpr int MAX_EPOCHS = 10'000'000;
 
 constexpr int n_threads = 8;
 static_assert(NP % n_threads == 0);
 constexpr int n_thread_pop = NP / n_threads;
 
-using Specie = array<float, NDIMS>;
+using Specie = array<double, NDIMS>;
 
-float fitness(const Specie& x) {
-    constexpr float A = 10;
+double mean_last_diff(const double* x, size_t n, size_t k) {
+    assert(n >= 2 && k >= 2);
+    double s = 0;
+    k = min(k, n);
+    for (size_t i = n - k; i < n; ++i)
+        s += fabs(x[i] - x[i - 1]);
+    return s / (n - 1);
+}
 
-    float s = A * NDIMS;
+double fitness(const Specie& x) {
+    constexpr double A = 10;
+
+    double s = A * NDIMS;
     for (int i = 0; i < NDIMS; ++i)
-        s += x[i] * x[i] - A * cosf(2 * M_PI * x[i]);
+        s += x[i] * x[i] - A * cos(2 * M_PI * x[i]);
 
     return s;
 }
 
 struct WorkerContext {
-    vector<tuple<int, float, Specie>> offspring;
-    vector<float> s_cr, s_f;
+    vector<tuple<int, double, Specie>> offspring;
+    vector<double> s_cr, s_f;
 
     default_random_engine rng;
 
     //read-only data
     const Specie* pop;
-    const float* pop_ft;
+    const double* pop_ft;
     const int* sorted_ics;
     const Specie* archive;
     int archive_size;
 
-    float nu_cr, nu_f;
+    double nu_cr, nu_f;
 
     int first_idx;
 };
@@ -66,16 +78,16 @@ void worker_routine(WorkerContext* pctx) {
     ctx.s_f.clear();
 
     uniform_int_distribution<int> randi(0, 2 * NP - 1);
-    normal_distribution<float> randn(ctx.nu_cr, 0.1f);
-    cauchy_distribution<float> randc(ctx.nu_f, 0.1f);
-    uniform_real_distribution<float> randf(0, 1);
+    normal_distribution<double> randn(ctx.nu_cr, 0.1);
+    cauchy_distribution<double> randc(ctx.nu_f, 0.1);
+    uniform_real_distribution<double> randf(0, 1);
 
     Specie y;
     int last_idx = ctx.first_idx + n_thread_pop - 1;
     for (int i = ctx.first_idx; i <= last_idx; ++i) {
         int x1_idx = 0, x2_idx = 0;
         int pbest_idx = ctx.sorted_ics[randi(ctx.rng) % P_NP];
-        int R = randi(ctx.rng);
+        int R = randi(ctx.rng) % NDIMS;
 
         for(x1_idx = randi(ctx.rng) % NP; 
             x1_idx == i || x1_idx == pbest_idx; 
@@ -92,14 +104,14 @@ void worker_routine(WorkerContext* pctx) {
         const Specie& x2 = x2_idx >= NP
             ? ctx.archive[x2_idx - NP] : ctx.pop[x2_idx];
 
-        float cr = clamp(randn(ctx.rng), 0.f, 1.f),
-              f = clamp(randn(ctx.rng), 0.f, 1.f);
+        double cr = clamp(randn(ctx.rng), 0.0, 1.0),
+              f = clamp(randc(ctx.rng), 0.0, 1.0);
         for (int j = 0; j < NDIMS; ++j) {
             int flag = randf(ctx.rng) <= cr || j == R;
             y[j] = x[j] + (f * (pbest[j] - x[j]) + f * (x1[j] - x2[j])) * flag;
         }
 
-        float fx = ctx.pop_ft[i], fy = fitness(y);
+        double fx = ctx.pop_ft[i], fy = fitness(y);
         if (fy <= fx) {
             ctx.offspring.emplace_back(i, fy, y);
             ctx.s_cr.push_back(cr);
@@ -108,17 +120,14 @@ void worker_routine(WorkerContext* pctx) {
     }
 }
 
-int main() {
-    char fname[128]{};
-    sprintf(fname, "%04d_%04d.txt", NDIMS, NP);
-    FILE* logfile = fopen(fname, "w");
-
+void run(uint64_t seed, vector<double> &hist, bool silent = false) 
+{
     vector<Specie> pop(NP);
-    vector<float> pop_ft(NP);
+    vector<double> pop_ft(NP);
     vector<int> sorted_ics(NP);
 
-    default_random_engine rng(1337);
-    normal_distribution<float> randn;
+    default_random_engine rng(seed);
+    normal_distribution<double> randn;
     for (int i = 0; i < NP; ++i) {
         for (int j = 0; j < NDIMS; ++j)
             pop[i][j] = randn(rng);
@@ -129,7 +138,7 @@ int main() {
     vector<Specie> archive;
     archive.reserve(2 * NP);
 
-    WorkerContext wcs[n_threads];
+    vector<WorkerContext> wcs(n_threads);
     uniform_int_distribution<unsigned int> randi(0, 0xFFFFFFFF);
     for (int i = 0; i < n_threads; ++i) {
         WorkerContext& ctx = wcs[i];
@@ -150,8 +159,8 @@ int main() {
 
     thread_pool_light pool(n_threads);
 
-    float nu_cr = 0.5, nu_f = 0.5;
-    for (int epoch = 0; epoch < EPOCHS; ++epoch) {
+    double nu_cr = 0.5, nu_f = 0.5;
+    for (int epoch = 0; epoch < MAX_EPOCHS; ++epoch) {
         partial_sort(
             begin(sorted_ics), 
             begin(sorted_ics) + P_NP, 
@@ -160,6 +169,16 @@ int main() {
                 return pop_ft[p] < pop_ft[q]; 
             }
         );
+
+        constexpr int T = 10;
+        if (epoch % T == 0) {
+			hist.push_back(pop_ft[sorted_ics[0]]);
+			if (hist.size() > 1) {
+				double diff = mean_last_diff(hist.data(), hist.size(), LAST_K / T);
+				if (diff < MIN_MEAN_DELTA)
+					break;
+			}
+        }
 
         for (int i = 0; i < n_threads; ++i) {
             wcs[i].nu_cr = nu_cr;
@@ -171,7 +190,7 @@ int main() {
         pool.wait_for_tasks();
 
         int total_successes = 0;
-        float sum_cr = 0, sum_f = 0, sum_f2 = 0;
+        double sum_cr = 0, sum_f = 0, sum_f2 = 0;
         for (int i = 0; i < n_threads; ++i) {
             WorkerContext& ctx = wcs[i];
             for (auto& [idx, ft, y]: ctx.offspring) {
@@ -195,16 +214,15 @@ int main() {
             archive.resize(NP);
 
         if (total_successes) {
-            assert(sum_f > 1e-8);
-            float mean_A = sum_cr / total_successes,
-                  mean_L = sum_f2 / sum_f;
+            double mean_A = sum_cr / total_successes,
+                  mean_L = sum_f > 1e-8 ? sum_f2 / sum_f : 0;
             nu_cr = (1 - C) * nu_cr + C * mean_A;
             nu_f = (1 - C) * nu_f + C * mean_L;
         }
 
-        if (epoch % 100 == 0 || epoch + 1 == EPOCHS) {
-            float mean = accumulate(pop_ft.begin(), pop_ft.end(), 0.f) / NP;
-            float best = *min_element(pop_ft.begin(), pop_ft.end());
+        if (epoch % 100 == 0 || epoch + 1 == MAX_EPOCHS) {
+            double mean = accumulate(pop_ft.begin(), pop_ft.end(), 0.0) / NP;
+            double best = *min_element(pop_ft.begin(), pop_ft.end());
 
             time_t t = time(0);
             auto now = localtime(&t);
@@ -213,11 +231,28 @@ int main() {
             sprintf(output, "[ %02d:%02d:%02d ] %05d mean: %.8f best: %.8f\n",
                     now->tm_hour, now->tm_min, now->tm_sec, 
                     epoch, mean, best);
-            printf("%s", output);
-            fprintf(logfile, "%s", output);
+            if (!silent)
+                printf("%s", output);
         }
     }
-
-    fclose(logfile);
 }
 
+int main() {
+    vector<double> hist;
+    hist.reserve(10240);
+
+    char fname[256]{};
+	sprintf(fname, "%d_%d.txt", NDIMS, NP);
+	FILE* file = fopen(fname, "w");
+
+    for (int i = 0; i < 20; ++i) {
+        hist.clear();
+        run(i, hist, false);
+
+        for (double j : hist)
+            fprintf(file, "%f ", j);
+        fprintf(file, "\n");
+    }
+
+	fclose(file);
+}
