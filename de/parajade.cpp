@@ -17,10 +17,10 @@
 using namespace std;
 using BS::thread_pool_light;
 
-constexpr int NP = 64;
+constexpr int NP = 128;
 constexpr int NDIMS = 200;
 
-constexpr size_t LAST_K = 5000;
+constexpr size_t LAST_K = 100;
 constexpr double MIN_MEAN_DELTA = 1e-10;
 
 constexpr int P_NP = max(1, int(0.05 * NP));
@@ -34,11 +34,10 @@ constexpr int n_thread_pop = NP / n_threads;
 
 using Specie = array<double, NDIMS>;
 
-double mean_last_diff(const double* x, size_t n, size_t k) {
-    assert(n >= 2 && k >= 2);
+double mean_diff(const double* x, size_t n) {
+    assert(n >= 2);
     double s = 0;
-    k = min(k, n);
-    for (size_t i = n - k; i < n; ++i)
+    for (size_t i = 1; i < n; ++i)
         s += fabs(x[i] - x[i - 1]);
     return s / (n - 1);
 }
@@ -120,8 +119,7 @@ void worker_routine(WorkerContext* pctx) {
     }
 }
 
-void run(uint64_t seed, vector<double> &hist, bool silent = false) 
-{
+void run(uint64_t seed, vector<double> &hist, bool silent = false) {
     vector<Specie> pop(NP);
     vector<double> pop_ft(NP);
     vector<int> sorted_ics(NP);
@@ -157,6 +155,9 @@ void run(uint64_t seed, vector<double> &hist, bool silent = false)
         ctx.first_idx = n_thread_pop * i;
     }
 
+	constexpr int T = 100;
+    array<double, LAST_K> mean_vals;
+
     thread_pool_light pool(n_threads);
 
     double nu_cr = 0.5, nu_f = 0.5;
@@ -170,15 +171,12 @@ void run(uint64_t seed, vector<double> &hist, bool silent = false)
             }
         );
 
-        constexpr int T = 10;
-        if (epoch % T == 0) {
+        if (epoch % T == 0)
 			hist.push_back(pop_ft[sorted_ics[0]]);
-			if (hist.size() > 1) {
-				double diff = mean_last_diff(hist.data(), hist.size(), LAST_K / T);
-				if (diff < MIN_MEAN_DELTA)
-					break;
-			}
-        }
+
+        mean_vals[epoch % LAST_K] = accumulate(pop_ft.begin(), pop_ft.end(), 0.0) / NP;
+        if (epoch >= LAST_K && mean_diff(mean_vals.data(), LAST_K) < MIN_MEAN_DELTA)
+            break;
 
         for (int i = 0; i < n_threads; ++i) {
             wcs[i].nu_cr = nu_cr;
@@ -220,7 +218,7 @@ void run(uint64_t seed, vector<double> &hist, bool silent = false)
             nu_f = (1 - C) * nu_f + C * mean_L;
         }
 
-        if (epoch % 100 == 0 || epoch + 1 == MAX_EPOCHS) {
+        if (epoch % T == 0 || epoch + 1 == MAX_EPOCHS) {
             double mean = accumulate(pop_ft.begin(), pop_ft.end(), 0.0) / NP;
             double best = *min_element(pop_ft.begin(), pop_ft.end());
 

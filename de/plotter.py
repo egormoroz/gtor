@@ -14,11 +14,12 @@ for i, y in enumerate(data):
     A[i] = y[:m]
 
 mean = np.mean(A, axis=0)
-mean_diff = np.mean(np.abs(A[1:] - A[:-1]), axis=0)
+mean_diff = np.max(np.abs(A[1:] - A[:-1]), axis=0)
 
 x = np.arange(m)
 plt.ylim(top=1000)
 plt.plot(x, mean, 
          x, mean + mean_diff, '--', 
-         x, mean - mean_diff, '--')
+         x, mean - mean_diff, '--',
+         x, np.zeros_like(x), '--')
 plt.show()
