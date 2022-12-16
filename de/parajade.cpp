@@ -17,8 +17,8 @@
 using namespace std;
 using BS::thread_pool_light;
 
-constexpr int NP = 128;
-constexpr int NDIMS = 200;
+constexpr int NP = 4096;
+constexpr int NDIMS = 1000;
 
 constexpr size_t LAST_K = 100;
 constexpr double MIN_MEAN_DELTA = 1e-10;
@@ -119,7 +119,7 @@ void worker_routine(WorkerContext* pctx) {
     }
 }
 
-void run(uint64_t seed, vector<double> &hist, bool silent = false) {
+void run(int seed, vector<double> &hist, bool silent = false) {
     vector<Specie> pop(NP);
     vector<double> pop_ft(NP);
     vector<int> sorted_ics(NP);
@@ -226,9 +226,9 @@ void run(uint64_t seed, vector<double> &hist, bool silent = false) {
             auto now = localtime(&t);
 
             char output[256]{};
-            sprintf(output, "[ %02d:%02d:%02d ] %05d mean: %.8f best: %.8f\n",
+            sprintf(output, "[ %02d:%02d:%02d ] %03d %05d mean: %.8f best: %.8f\n",
                     now->tm_hour, now->tm_min, now->tm_sec, 
-                    epoch, mean, best);
+                    seed, epoch, mean, best);
             if (!silent)
                 printf("%s", output);
         }
@@ -243,7 +243,7 @@ int main() {
 	sprintf(fname, "%d_%d.txt", NDIMS, NP);
 	FILE* file = fopen(fname, "w");
 
-    for (int i = 0; i < 20; ++i) {
+    for (int i = 0; i < 100; ++i) {
         hist.clear();
         run(i, hist, false);
 
