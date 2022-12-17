@@ -107,7 +107,7 @@ def branch_and_bound(A, b, c, s, I, lo=None, up=None, target_gap=1e-5):
 
     counter = count()
     q = []
-    q.append((n, -1e20, next(counter), lo, up, fixed))
+    q.append((n, 0, -1e20, next(counter), lo, up, fixed))
 
     if I is None:
         I = np.array([True] * n)
@@ -115,7 +115,7 @@ def branch_and_bound(A, b, c, s, I, lo=None, up=None, target_gap=1e-5):
     best_sol, primal_bound = None, 1e20
 
     while q:
-        n_vars, dual_bound, k, lo, up, fixed = heappop(q)
+        n_vars, parent_z, _, k, lo, up, fixed = heappop(q)
 
         sln = solve_relaxation(A, b, c, s, lo, up, fixed)
         if sln is None:
@@ -139,13 +139,11 @@ def branch_and_bound(A, b, c, s, I, lo=None, up=None, target_gap=1e-5):
             if best_sol is None or z < primal_bound:
                 best_sol, primal_bound = x, z
 
-                gap = primal_bound - dual_bound
-                gap /= max(EPS, min(abs(primal_bound), 
-                                      abs(dual_bound)))
+                # gap = primal_bound - parent_z
+                # gap /= max(EPS, min(abs(primal_bound), 
+                #                       abs(parent_z)))
 
-                print('** {} {} {:.2e}'.format('haha', z, gap), k)
-                if gap < target_gap:
-                    break
+                print(f'new best feasible {z} {k}')
             continue
 
         for i in non_ints:
@@ -153,21 +151,21 @@ def branch_and_bound(A, b, c, s, I, lo=None, up=None, target_gap=1e-5):
             if lo_vals[i] <= bnd and bnd <= up_vals[i]:
                 if bnd - lo_vals[i] <= EPS:
                     new_fixed = fix_var(i, bnd, fixed)
-                    heappush(q, (n_vars - 1, z, next(counter), lo, up, new_fixed))
+                    heappush(q, (n_vars - 1, z, -(x[i] - bnd), next(counter), lo, up, new_fixed))
                 else:
                     new_up = tighten_up(i, bnd, up)
-                    heappush(q, (n_vars, z, next(counter), lo, new_up, fixed))
+                    heappush(q, (n_vars, z, -(x[i] - bnd), next(counter), lo, new_up, fixed))
             bnd += 1
             if lo_vals[i] <= bnd and bnd <= up_vals[i]:
                 if up_vals[i] - bnd <= EPS:
                     new_fixed = fix_var(i, bnd, fixed)
-                    heappush(q, (n_vars - 1, z, next(counter), lo, up, new_fixed))
+                    heappush(q, (n_vars - 1, z, -(bnd - x[i]), next(counter), lo, up, new_fixed))
                 else:
                     new_lo = tighten_lo(i, bnd, lo)
-                    heappush(q, (n_vars, z, next(counter), new_lo, up, fixed))
+                    heappush(q, (n_vars, z, -(bnd - x[i]), next(counter), new_lo, up, fixed))
 
 
-    return best_sol, primal_bound, gap
+    return best_sol, primal_bound #, gap
 
 
 def main():
@@ -196,10 +194,10 @@ def main():
 
 
 if __name__ == '__main__':
-    #np.set_printoptions(edgeitems=30, linewidth=100000)
+    #np.set_printoptions(edgeitems=30, linewidth=100000) 
 
-    #A, b, c, s, I, lo, up = read_mps('gen-ip016.mps')
-    #branch_and_bound(A, b, c, s, I, lo=lo, up=up)
+    # A, b, c, s, I, lo, up = read_mps('markshare_4_0.mps')
+    # branch_and_bound(A, b, c, s, I, lo=lo, up=up)
 
     main()
 
