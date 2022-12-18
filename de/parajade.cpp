@@ -1,4 +1,4 @@
-#define _USE_MATH_DEFINES
+﻿#define _USE_MATH_DEFINES
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <vector>
@@ -17,9 +17,12 @@
 using namespace std;
 using BS::thread_pool_light;
 
-constexpr int NP = 4096;
+// Размер популяции
+constexpr int NP = 512;
+// Размерность функции преспособленности
 constexpr int NDIMS = 1000;
 
+// Параметры для критерия остановки
 constexpr size_t LAST_K = 100;
 constexpr double MIN_MEAN_DELTA = 1e-10;
 
@@ -34,6 +37,7 @@ constexpr int n_thread_pop = NP / n_threads;
 
 using Specie = array<double, NDIMS>;
 
+// Средняя разность меджу подряд идущими элементами массива x
 double mean_diff(const double* x, size_t n) {
     assert(n >= 2);
     double s = 0;
@@ -42,6 +46,7 @@ double mean_diff(const double* x, size_t n) {
     return s / (n - 1);
 }
 
+// Функция преспособленности
 double fitness(const Specie& x) {
     constexpr double A = 10;
 
@@ -59,15 +64,15 @@ struct WorkerContext {
     default_random_engine rng;
 
     //read-only data
-    const Specie* pop;
-    const double* pop_ft;
-    const int* sorted_ics;
-    const Specie* archive;
-    int archive_size;
+    const Specie* pop = nullptr;
+    const double* pop_ft = nullptr;
+    const int* sorted_ics = nullptr;
+    const Specie* archive = nullptr;
+    int archive_size = 0;
 
-    double nu_cr, nu_f;
+    double nu_cr = 0, nu_f = 0;
 
-    int first_idx;
+    int first_idx = 0;
 };
 
 void worker_routine(WorkerContext* pctx) {
@@ -97,6 +102,7 @@ void worker_routine(WorkerContext* pctx) {
             x2_idx == i || x2_idx == pbest_idx || x2_idx == x1_idx; 
             x2_idx = randi(ctx.rng) % n);
 
+        // Набраь разных особей для скрещивания
         const Specie& x = ctx.pop[i];
         const Specie& pbest = ctx.pop[pbest_idx];
         const Specie& x1 = ctx.pop[x1_idx];
@@ -107,11 +113,13 @@ void worker_routine(WorkerContext* pctx) {
               f = clamp(randc(ctx.rng), 0.0, 1.0);
         for (int j = 0; j < NDIMS; ++j) {
             int flag = randf(ctx.rng) <= cr || j == R;
+            // Скрещивание + мутация в одной формуле
             y[j] = x[j] + (f * (pbest[j] - x[j]) + f * (x1[j] - x2[j])) * flag;
         }
 
         double fx = ctx.pop_ft[i], fy = fitness(y);
         if (fy <= fx) {
+            // Поток улучшил значение преспособленности, запоминаем его
             ctx.offspring.emplace_back(i, fy, y);
             ctx.s_cr.push_back(cr);
             ctx.s_f.push_back(f);
@@ -124,6 +132,7 @@ void run(int seed, vector<double> &hist, bool silent = false) {
     vector<double> pop_ft(NP);
     vector<int> sorted_ics(NP);
 
+    // Набрать начальную популяцию из стандартного нормального распределения
     default_random_engine rng(seed);
     normal_distribution<double> randn;
     for (int i = 0; i < NP; ++i) {
@@ -136,6 +145,7 @@ void run(int seed, vector<double> &hist, bool silent = false) {
     vector<Specie> archive;
     archive.reserve(2 * NP);
 
+    // Проинициализировать данные для потоков
     vector<WorkerContext> wcs(n_threads);
     uniform_int_distribution<unsigned int> randi(0, 0xFFFFFFFF);
     for (int i = 0; i < n_threads; ++i) {
@@ -155,13 +165,16 @@ void run(int seed, vector<double> &hist, bool silent = false) {
         ctx.first_idx = n_thread_pop * i;
     }
 
-	constexpr int T = 100;
+    // Период сохранение лучшей преспособленности (для графиков)
+    constexpr int T = 100;
+    // Средняя преспособленность за последние LAST_K эпох
     array<double, LAST_K> mean_vals;
 
     thread_pool_light pool(n_threads);
 
     double nu_cr = 0.5, nu_f = 0.5;
     for (int epoch = 0; epoch < MAX_EPOCHS; ++epoch) {
+        // Помещаем в sorted_ics индексы p% лучших особей
         partial_sort(
             begin(sorted_ics), 
             begin(sorted_ics) + P_NP, 
@@ -171,13 +184,20 @@ void run(int seed, vector<double> &hist, bool silent = false) {
             }
         );
 
-        if (epoch % T == 0)
-			hist.push_back(pop_ft[sorted_ics[0]]);
+        // Каждые T эпох сохраняем лучшую преспособленность
+        if (epoch % T == 0) 
+            hist.push_back(pop_ft[sorted_ics[0]]);
 
+        // Запоминаем среднюю преспособленность популяции за последние LAST_K эпох
         mean_vals[epoch % LAST_K] = accumulate(pop_ft.begin(), pop_ft.end(), 0.0) / NP;
+        // Если прошло хотя бы LAST_K эпох и *средняя разность* mean_vals 
+        // меньше MIN_MEAN_DELTA, останавливаемся
+        // Смысл такой: последние LAST_K популяция стагнировала: либо мы достигли минимума
+        // либо застряли на плато..
         if (epoch >= LAST_K && mean_diff(mean_vals.data(), LAST_K) < MIN_MEAN_DELTA)
             break;
 
+        // Посчитать одну эпоху на нескольких потоках
         for (int i = 0; i < n_threads; ++i) {
             wcs[i].nu_cr = nu_cr;
             wcs[i].nu_f = nu_f;
@@ -187,6 +207,7 @@ void run(int seed, vector<double> &hist, bool silent = false) {
 
         pool.wait_for_tasks();
 
+        // Собираем результаты работы одной эпохи
         int total_successes = 0;
         double sum_cr = 0, sum_f = 0, sum_f2 = 0;
         for (int i = 0; i < n_threads; ++i) {
@@ -206,19 +227,21 @@ void run(int seed, vector<double> &hist, bool silent = false) {
             }
         }
 
+        // Если архив переполнен, удаляем из него старых особей
         for (int i = NP; i < (int)archive.size(); ++i)
             swap(archive[i - NP], archive[i]);
         if (archive.size() > NP)
             archive.resize(NP);
 
         if (total_successes) {
+            // Пересчитываем скрещивания и мутации для следующей эпохи
             double mean_A = sum_cr / total_successes,
                   mean_L = sum_f > 1e-8 ? sum_f2 / sum_f : 0;
             nu_cr = (1 - C) * nu_cr + C * mean_A;
             nu_f = (1 - C) * nu_f + C * mean_L;
         }
 
-        if (epoch % T == 0 || epoch + 1 == MAX_EPOCHS) {
+        if (epoch % T == 0 || epoch + 1 == MAX_EPOCHS && !silent) {
             double mean = accumulate(pop_ft.begin(), pop_ft.end(), 0.0) / NP;
             double best = *min_element(pop_ft.begin(), pop_ft.end());
 
@@ -229,20 +252,21 @@ void run(int seed, vector<double> &hist, bool silent = false) {
             sprintf(output, "[ %02d:%02d:%02d ] %03d %05d mean: %.8f best: %.8f\n",
                     now->tm_hour, now->tm_min, now->tm_sec, 
                     seed, epoch, mean, best);
-            if (!silent)
-                printf("%s", output);
+            printf("%s", output);
         }
     }
 }
 
 int main() {
+    // История значений наилучшей преспособленности. Для графиков.
     vector<double> hist;
     hist.reserve(10240);
 
     char fname[256]{};
-	sprintf(fname, "%d_%d.txt", NDIMS, NP);
-	FILE* file = fopen(fname, "w");
+    sprintf(fname, "%d_%d.txt", NDIMS, NP);
+    FILE* file = fopen(fname, "w");
 
+    // Делаем 100 прогонов с разными seedами и сохраняем результаты в файл
     for (int i = 0; i < 100; ++i) {
         hist.clear();
         run(i, hist, false);
@@ -252,5 +276,5 @@ int main() {
         fprintf(file, "\n");
     }
 
-	fclose(file);
+    fclose(file);
 }
